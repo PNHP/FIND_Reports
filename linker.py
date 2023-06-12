@@ -15,6 +15,7 @@ def produce_report(survey_sites,
                    property_name,
                    output_path):
     arcpy.AddMessage("Entering produce_report")
+    arcpy.AddMessage(output_path)
     survey_sites_row_num = survey_sites.shape[0]
     survey_sites_col_num = 4
     el_and_comms_row_num = el_and_comms.shape[0]
@@ -61,16 +62,16 @@ def produce_report(survey_sites,
                     table.add_row(tuple(curr_row))
 
     # doc.generate_tex(filepath=f'{current_path}/{property_name}_report')
-    doc.generate_tex(filepath=f'{output_path}/{property_name}report')
-    arcpy.AddMessage(f'generate report here: {output_path}/{property_name}report')
+    doc.generate_tex(filepath=f'{output_path}'+"/"+f'{property_name}_report')
+    arcpy.AddMessage(f'generate report here: {output_path}'+"/"+f'{property_name}_report')
 
     # Specify the path to the LaTeX file
-    latex_file = f'{output_path}/{property_name}report.tex'
-    print("latex_file:", latex_file)
+    latex_file = f'{output_path}'+"/"+f'{property_name}_report.tex'
+    arcpy.AddMessage(f"latex_file: {latex_file}")
 
     # Specify the path to the output PDF file
-    pdf_file = f'{output_path}/{property_name}report.pdf'
-    print("pdf_file:", pdf_file)
+    pdf_file = f'{output_path}'+"/"+f'{property_name}_report.pdf'
+    arcpy("pdf_file:", pdf_file)
 
     # Execute the LaTeX compiler command
     subprocess.run(['pdflatex', '-interaction=nonstopmode', latex_file])

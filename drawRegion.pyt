@@ -38,16 +38,15 @@ class regionData(object):
             parameterType="Required",
             direction="Input")
 
-        output_pdf = arcpy.Parameter(
+        output_location = arcpy.Parameter(
             name="output_pdf",
-            displayName="Output PDF File",
-            datatype="DEFile",
-            parameterType="Derived",
-            direction="Output"
+            displayName="Output PDF File Location",
+            datatype="DEFolder",
+            parameterType="Required",
+            direction="Input"
         )
-        # output_pdf.filter.type = "PDF"
 
-        return [feature_set, property_name, output_pdf]
+        return [feature_set, property_name, output_location]
 
     def isLicensed(self):
         return True
@@ -125,10 +124,16 @@ class regionData(object):
             # Merge curr_df with survey_sites_df
             el_and_comms = pd.concat([el_and_comms, curr_df])
         arcpy.AddMessage("Before produce_report")
-        linker.produce_report(survey_sites=survey_sites_df,
-                              el_and_comms=el_and_comms,
-                              property_name=property_name,
-                              output_path=output_pdf_path)
+        if testing:
+            linker.produce_report(survey_sites=survey_sites_df,
+                                  el_and_comms=el_and_comms,
+                                  property_name=property_name,
+                                  output_path=output_pdf_path)
+        else:
+            linker.produce_report(survey_sites=survey_sites_df,
+                                  el_and_comms=el_and_comms,
+                                  property_name=property_name.valueAsText,
+                                  output_path=output_pdf_path)
 
 
 
