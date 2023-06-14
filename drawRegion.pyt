@@ -38,6 +38,7 @@ class regionData(object):
             parameterType="Required",
             direction="Input")
 
+        # Define user-specified output directory
         output_location = arcpy.Parameter(
             name="output_pdf",
             displayName="Output PDF File Location",
@@ -60,12 +61,12 @@ class regionData(object):
     def execute(self, params, messages):
         input_lyr = params[0]
         property_name = params[1]
-        arcpy.AddMessage(property_name.valueAsText)
+        arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
-        arcpy.AddMessage(output_pdf_path)
 
-        testing = False
+        testing = True
 
+        # Hardcode for testing purposes
         if testing:
             input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test1"
             property_name = "trytry"
@@ -82,7 +83,7 @@ class regionData(object):
         # Make feature layer for survey_poly
         arcpy.MakeFeatureLayer_management(survey_poly_addr, "survey_sites_lyr")
 
-        # Make feature layer for input parameter
+        # Make feature layer for input feature parameter
         if testing:
             arcpy.management.MakeFeatureLayer(input_lyr, "OutputFeatureLayer")
         else:
@@ -96,7 +97,7 @@ class regionData(object):
         survey_sites_df = pd.DataFrame(data=arcpy.da.SearchCursor(new_lyr, survey_poly_vars),
                                        columns=survey_poly_vars)
 
-        # get refcode list
+        # Get refcode list
         refcode_list = (survey_sites_df["refcode"]).tolist()
 
         el_pt = survey_addr + "\el_pt"
@@ -123,25 +124,32 @@ class regionData(object):
                                    columns=curr_fields)
             # Merge curr_df with survey_sites_df
             el_and_comms = pd.concat([el_and_comms, curr_df])
-        arcpy.AddMessage("Before produce_report")
+
+        # Get species information from Biotics database ET table
+        biotics_path = "C:/Users/hyu/Desktop/GIS_projects/Biotics_datasets.gdb"
+        table_name = "ET"
+        table_path = arcpy.Describe(f"{biotics_path}/{table_name}").catalogPath
+        ET_arr = arcpy.da.TableToNumPyArray(table_path, ['ELSUBID', 'SPROT'])
+        speciesET_df = pd.DataFrame(ET_arr)
+        # Change ELSUBID to elem_name
+        speciesET_df.columns = ['elem_name', 'SPROT']
+        # Merge speciedET_df and el_and_comms based on elem_name(or ELSUBID)
+        speciesET_df['elem_name'] = speciesET_df['elem_name'].astype('int32')
+        el_and_comms['elem_name'] = el_and_comms['elem_name'].astype('int32')
+
+        species_info_df = pd.merge(speciesET_df, el_and_comms, on="elem_name")
+
+
+        # Generate LaTeX and PDF report
         if testing:
             linker.produce_report(survey_sites=survey_sites_df,
                                   el_and_comms=el_and_comms,
                                   property_name=property_name,
-                                  output_path=output_pdf_path)
+                                  output_path=output_pdf_path,
+                                  species_info_df=species_info_df)
         else:
             linker.produce_report(survey_sites=survey_sites_df,
                                   el_and_comms=el_and_comms,
                                   property_name=property_name.valueAsText,
-                                  output_path=output_pdf_path)
-
-
-
-
-
-
-
-
-
-
-
+                                  output_path=output_pdf_path,
+                                  species_info_df=species_info_df)
