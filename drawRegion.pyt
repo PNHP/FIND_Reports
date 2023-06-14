@@ -9,6 +9,7 @@ import linker # Latex and PDF report generator
 arcpy.env.workspace = "memory"
 arcpy.env.overwriteOutput = True
 
+
 class Toolbox(object):
     def __init__(self):
         self.label = "draw region"
@@ -64,12 +65,13 @@ class regionData(object):
         arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
 
-        testing = True
+        testing = False
 
         # Hardcode for testing purposes
         if testing:
+            # arcpy.AddMessage("ENTERRRRRRRRRRRRRRRR")
             input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test1"
-            property_name = "trytry"
+            property_name = "trytry1"
             output_pdf_path = "C:/Users/hyu/Desktop/"
 
         # Survey Site dataframe, address and variables are hardcoded
@@ -96,6 +98,7 @@ class regionData(object):
         # Make result survey_sites dataframe
         survey_sites_df = pd.DataFrame(data=arcpy.da.SearchCursor(new_lyr, survey_poly_vars),
                                        columns=survey_poly_vars)
+        survey_sites_df.columns = survey_poly_vars
 
         # Get refcode list
         refcode_list = (survey_sites_df["refcode"]).tolist()
@@ -142,11 +145,11 @@ class regionData(object):
 
         # Generate LaTeX and PDF report
         if testing:
-            linker.produce_report(survey_sites=survey_sites_df,
-                                  el_and_comms=el_and_comms,
-                                  property_name=property_name,
-                                  output_path=output_pdf_path,
-                                  species_info_df=species_info_df)
+            linker.produce_report(survey_sites_df,
+                                  el_and_comms,
+                                  property_name,
+                                  output_pdf_path,
+                                  species_info_df)
         else:
             linker.produce_report(survey_sites=survey_sites_df,
                                   el_and_comms=el_and_comms,

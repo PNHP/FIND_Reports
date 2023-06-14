@@ -1,8 +1,8 @@
 import os
 import numpy as np
 from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
-    Plot, Figure, Matrix, Alignat
-from pylatex.utils import italic
+    Plot, Figure, Matrix, Alignat, MediumText, LineBreak
+from pylatex.utils import italic, bold
 import subprocess
 import arcpy
 import report_template
@@ -16,20 +16,26 @@ def produce_report(survey_sites,
                    property_name,
                    output_path,
                    species_info_df):
-    # arcpy.AddMessage("Entering produce_report")
-    # arcpy.AddMessage(output_path)
-    # survey_sites_row_num = survey_sites.shape[0]
-    # survey_sites_col_num = 4
-    # el_and_comms_row_num = el_and_comms.shape[0]
-    # el_and_comms_col_num = 4
+    survey_sites_row_num = survey_sites.shape[0]
+    survey_sites_col_num = 4
+    el_and_comms_row_num = el_and_comms.shape[0]
+    el_and_comms_col_num = 4
+
+    survey_sites_colnames = survey_sites.columns
+    el_and_comms_colnames = el_and_comms.columns
     #
-    # survey_sites_colnames = survey_sites.columns
-    # el_and_comms_colnames = el_and_comms.columns
-    #
-    # geometry_options = {"tmargin": "1cm", "lmargin": "1cm"}
-    # doc = Document(geometry_options=geometry_options)
-    #
-    # # Create titles
+    geometry_options = {"tmargin": "1cm", "lmargin": "1cm"}
+    doc = Document(geometry_options=geometry_options)
+    with doc.create(Section(f'{property_name}')):
+        # Raw Site Descriptions (directly drawn from FIND)
+        for i in range(survey_sites.shape[0]):
+            curr_sitename = survey_sites.iloc[i].at['survey_sit']
+            curr_sitedesc = survey_sites.iloc[i].at['site_desc']
+            doc.append(MediumText(f'{curr_sitename}: {curr_sitedesc}\n'))
+            doc.append("not end here ----\n")
+
+
+    # Create titles
     # with doc.create(Section(f'{property_name} Report')):
     #     doc.append('Here is the survey sites report that you requested:\n')
     #     doc.append(f'There are {survey_sites_row_num} survey sites in total in the area you requested.\n')
@@ -58,7 +64,7 @@ def produce_report(survey_sites,
     #                 curr_row = el_and_comms.iloc[i, :4]
     #                 table.add_hline()
     #                 table.add_row(tuple(curr_row))
-    doc = report_template.template(survey_sites, el_and_comms, property_name, species_info_df)
+    # doc = report_template.template(survey_sites, el_and_comms, property_name, species_info_df)
 
     # doc.generate_tex(filepath=f'{current_path}/{property_name}_report')
     doc.generate_tex(filepath=f'{output_path}'+"/"+f'{property_name}_report')
