@@ -68,8 +68,8 @@ class regionData(object):
 
         if testing:
             input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test1"
-            property_name = "Sample_Allegheny"
-            output_pdf_path = "C:/Users/hyu/Desktop"
+            property_name = "trytry"
+            output_pdf_path = "C:/Users/hyu/Desktop/"
 
         # Survey Site dataframe, address and variables are hardcoded
         survey_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"

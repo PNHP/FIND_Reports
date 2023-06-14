@@ -26,7 +26,7 @@ def produce_report(survey_sites,
 
     # Current path is temporarily hardcoded
     # current_path = os.path.dirname(os.path.dirname(__file__))
-    current_path = "C:/Users/hyu/Desktop"
+    # current_path = "C:/Users/hyu/Desktop"
 
     geometry_options = {"tmargin": "1cm", "lmargin": "1cm"}
     doc = Document(geometry_options=geometry_options)
@@ -70,8 +70,14 @@ def produce_report(survey_sites,
     arcpy.AddMessage(f"latex_file: {latex_file}")
 
     # Specify the path to the output PDF file
-    pdf_file = f'{output_path}'+"/"+f'{property_name}_report.pdf'
-    arcpy("pdf_file:", pdf_file)
+    # pdf_file = f'{output_path}'+"/"+f'{property_name}_report.pdf'
+    pdf_file = f'{output_path}'
+    arcpy.AddMessage(f"pdf_file: {pdf_file}")
+    print("output_path:", output_path)
 
     # Execute the LaTeX compiler command
-    subprocess.run(['pdflatex', '-interaction=nonstopmode', latex_file])
+    # subprocess.run(['pdflatex', '-interaction=nonstopmode', '-output-directory', pdf_file, latex_file])
+    subprocess.run(
+        ['pdflatex', '-output-directory=' + pdf_file, latex_file])
+    arcpy.AddMessage("Successfully compiled latex-pdf conversion")
+
