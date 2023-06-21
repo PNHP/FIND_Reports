@@ -7,7 +7,7 @@ import subprocess
 
 from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
     Plot, Figure, Matrix, Alignat, MediumText, LineBreak, Head, MiniPage, NoEscape, \
-    LargeText, PageStyle
+    LargeText, PageStyle, Command
 from pylatex.utils import bold, italic
 
 arcpy.env.workspace = "memory"
@@ -74,8 +74,8 @@ class regionData(object):
 
         # Hardcode for testing purposes
         if testing:
-            input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test1"
-            property_name = "trytry2"
+            input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test2"
+            property_name = "Local Test"
             output_pdf_path = "C:/Users/hyu/Desktop/"
 
         # Survey Site dataframe, address and variables are hardcoded
@@ -142,53 +142,90 @@ class regionData(object):
         biotics_path = "C:/Users/hyu/Desktop/GIS_projects/Biotics_datasets.gdb"
         table_name = "ET"
         table_path = arcpy.Describe(f"{biotics_path}/{table_name}").catalogPath
-        ET_arr = arcpy.da.TableToNumPyArray(table_path, ['ELSUBID', 'SPROT'])
+        ET_arr = arcpy.da.TableToNumPyArray(table_path, ['ELSUBID', 'SPROT', 'SNAME', 'SCOMNAME'])
         speciesET_df = pd.DataFrame(ET_arr)
         # Change ELSUBID to elem_name
-        speciesET_df.columns = ['elem_name', 'SPROT']
+        speciesET_df.columns = ['elem_name', 'SPROT', 'SNAME', 'SCOMNAME']
         # Merge speciedET_df and el_and_comms based on elem_name(or ELSUBID)
         speciesET_df['elem_name'] = speciesET_df['elem_name'].astype('int32')
         el_and_comms['elem_name'] = el_and_comms['elem_name'].astype('int32')
 
         species_info_df = pd.merge(speciesET_df, el_and_comms, on="elem_name")
+        # Delete duplicates with same refcode and same elem_name
+        species_info_df = species_info_df.drop_duplicates(subset=['refcode', 'elem_name'])
 
         # Generate LaTeX and PDF report
         if testing:
             # geometry_options = {"tmargin": "1cm", "lmargin": "1cm"}
             geometry_options = {
-                "head": "40pt",
-                "margin": "0.5in",
-                "bottom": "0.6in",
-                "includeheadfoot": True
+                "margin": "0.5in"
             }
             doc = Document(geometry_options=geometry_options)
 
-            # Create title: bold{property}
-            first_page = PageStyle("firstpage")
+            # Create title
+            with doc.create(Section(f'{property_name}', numbering=False)):
+                doc.append(f'There are {survey_sites_df.shape[0]} survey sites in the area you requested.\n')
 
-            with first_page.create(Head("L")) as header_left:
-                with header_left.create(MiniPage(width=NoEscape(r"0.49\textwidth"),
-                                                 pos='c')) as title_wrapper:
-                    title_wrapper.append(LargeText(bold(f"{property_name}")))
+                # Create subsections for survey site descriptions and findings
+                for i in range(survey_sites_df.shape[0]):
+                    curr_site = survey_sites_df.iloc[i]
+                    site_name = curr_site["survey_sit"]
+                    site_survey_date = curr_site["survey_start"]
+                    site_description = curr_site["site_desc"]
+                    with doc.create(Section(site_name)) as site:
+                        # Survey start date
+                        site.append(f'Survey date: {site_survey_date} \n')
+                        # Survey site raw description (directly drawn from FIND)
+                        site.append(bold("Site Description: \n"))
+                        site.append(f'{site_description} \n')
 
-            with first_page.create(Head("R")) as right_header:
-                with right_header.create(MiniPage(width=NoEscape(r"0.49\textwidth"),
-                                                  pos='c', align='r')) as title_wrapper:
-                    pass
+                        # Survey site findings
+                        site.append(bold("Findings: \n"))
+                        # Scratch: make a table for species info at this survey site
+                        # 1. get the species of the same refcode
+                        curr_refcode = curr_site["refcode"]
+                        site_species_df = species_info_df[species_info_df["refcode"] == curr_refcode]
+                        # 2. get all found elements in the area
+                        site_found_df = site_species_df[site_species_df["elem_found"] == "Y"]
+                        # 3. get all not_founded elements in the area
+                        site_unfound_df = site_species_df[site_species_df["elem_found"] == "N"]
 
-            doc.preamble.append(first_page)
-            doc.change_document_style("firstpage")
-
-            doc.append('Here is the survey sites report that you requested:\n')
-            doc.append(f'There are {survey_sites_df.shape[0]} survey sites in the area you requested.\n')
-
-            # print(survey_sites_df.columns)
-            # # Create subsections for survey site descriptions and findings
-            # for i in range(survey_sites_df.shape[0]):
-            #     curr_site = survey_sites_df.iloc[i]
-
-            # doc.append(NoEscape(r'\end{document}'))
-            doc.append(LineBreak())
+                        if site_found_df.shape[0] == 0 and site_unfound_df.shape[0] == 0:
+                            site.append("Our record shows that there are no elements in the area you requested.\n")
+                        elif site_found_df.shape[0] == 0:
+                            site.append("Table of unfounded elements in the area you requested:\n")
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
+                                for j in range(site_unfound_df.shape[0]):
+                                    curr_row = site_unfound_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                        elif site_unfound_df.shape[0] == 0:
+                            table_spec = "c|" * 4
+                            site.append("Table of found elements in the area you requested:\n")
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
+                                for j in range(site_found_df.shape[0]):
+                                    curr_row = site_found_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                        else:
+                            table_spec = "c|" * 4
+                            site.append("Table of found elements in the area you requested:\n")
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
+                                for j in range(site_found_df.shape[0]):
+                                    curr_row = site_found_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                            site.append(LineBreak())
+                            site.append("Table of unfounded elements in the area you requested:\n")
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
+                                for j in range(site_unfound_df.shape[0]):
+                                    curr_row = site_unfound_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
 
             doc.generate_tex(filepath=f'{output_pdf_path}' + f'{property_name}_report')
             arcpy.AddMessage(f'generate report here: {output_pdf_path}' + f'{property_name}_report')
@@ -203,8 +240,7 @@ class regionData(object):
             arcpy.AddMessage(f"pdf_file: {pdf_file}")
 
             # Execute the LaTeX compiler command and move PDF report to user-specified directory
-            subprocess.run(
-                ['pdflatex', '-output-directory=' + pdf_file, latex_file])
+            subprocess.run(['pdflatex', '-output-directory=' + pdf_file, latex_file])
         else:
             geometry_options = {"tmargin": "1cm", "lmargin": "1cm"}
             doc = Document(geometry_options=geometry_options)
