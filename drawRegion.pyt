@@ -65,13 +65,13 @@ class regionData(object):
         arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
 
-        testing = False
+        testing = True
 
         # Hardcode for testing purposes
         if testing:
             # arcpy.AddMessage("ENTERRRRRRRRRRRRRRRR")
             input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test1"
-            property_name = "trytry1"
+            property_name = "trytry2"
             output_pdf_path = "C:/Users/hyu/Desktop/"
 
         # Survey Site dataframe, address and variables are hardcoded

@@ -33,6 +33,7 @@ def produce_report(survey_sites,
             curr_sitedesc = survey_sites.iloc[i].at['site_desc']
             doc.append(MediumText(f'{curr_sitename}: {curr_sitedesc}\n'))
             doc.append("not end here ----\n")
+            doc.append("~~~~~~~")
 
 
     # Create titles
@@ -67,16 +68,16 @@ def produce_report(survey_sites,
     # doc = report_template.template(survey_sites, el_and_comms, property_name, species_info_df)
 
     # doc.generate_tex(filepath=f'{current_path}/{property_name}_report')
-    doc.generate_tex(filepath=f'{output_path}'+"/"+f'{property_name}_report')
-    arcpy.AddMessage(f'generate report here: {output_path}'+"/"+f'{property_name}_report')
+    doc.generate_tex(filepath=f'{output_path}'+f'{property_name}_report')
+    arcpy.AddMessage(f'generate report here: {output_path}'+f'{property_name}_report')
 
     # Specify the path to the LaTeX file
-    latex_file = f'{output_path}'+"/"+f'{property_name}_report.tex'
+    latex_file = f'{output_path}'+f'{property_name}_report.tex'
     arcpy.AddMessage(f"latex_file: {latex_file}")
 
     # Specify the path to the output PDF file
-    # pdf_file = f'{output_path}'+"/"+f'{property_name}_report.pdf'
-    pdf_file = f'{output_path}'
+    pdf_file = f'{output_path}'+"/"+f'{property_name}_report.pdf'
+    # pdf_file = f'{output_path}'
     arcpy.AddMessage(f"pdf_file: {pdf_file}")
 
     # Execute the LaTeX compiler command and move PDF report to user-specified directory
