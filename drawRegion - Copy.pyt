@@ -7,7 +7,7 @@ import subprocess
 
 from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
     Plot, Figure, Matrix, Alignat, MediumText, LineBreak, Head, MiniPage, NoEscape, \
-    LargeText, PageStyle, Command
+    LargeText, PageStyle, Command, Itemize
 from pylatex.utils import bold, italic
 
 arcpy.env.workspace = "memory"
@@ -81,9 +81,9 @@ class regionData(object):
         # Survey Site dataframe, address and variables are hardcoded
         survey_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
         survey_poly_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb\survey_poly"
-        survey_poly_vars = ['refcode', 'dm_stat', 'survey_start', 'survey_sit', 'site_desc', 'site_comm',
-                            'land_use_in_site',
-                            'land_use_surr_site', 'threats']
+        survey_poly_vars = ['refcode', 'dm_stat', 'survey_start', 'survey_end', 'surveyors', 'survey_sit', 'site_desc',
+                            'site_comm', 'survey_typ', 'survey_typ_comm', 'land_use_in_site','land_use_surr_site',
+                            'threats', 'drive_direc']
         sample_df = pd.DataFrame(data=arcpy.da.SearchCursor(survey_poly_addr, survey_poly_vars),
                                  columns=survey_poly_vars)
 
@@ -130,7 +130,7 @@ class regionData(object):
                 curr_fields = ['refcode', 'elem_name', 'elem_found', 'elem_found_comm', 'invasive_present',
                                'pmash_comm',
                                'eo_size', 'eo_landsc', 'eo_rank', 'eo_rank_comm', 'mgmt_needs', 'protect_needs',
-                               'pmash_condition', 'disturb']  # last two are EO_conditions
+                               'pmash_condition', 'disturb', 'direc_elem']  # last two are EO_conditions
             else:
                 curr_fields = [field.name for field in arcpy.ListFields(layer)]
             curr_df = pd.DataFrame(data=arcpy.da.SearchCursor(curr_layer, curr_fields),
@@ -153,14 +153,46 @@ class regionData(object):
         species_info_df = pd.merge(speciesET_df, el_and_comms, on="elem_name")
         # Delete duplicates with same refcode and same elem_name
         species_info_df = species_info_df.drop_duplicates(subset=['refcode', 'elem_name'])
+        # Map SPROT column to its real meaning in English
+        def map_SPROT(sprot):
+            if sprot == "PE":
+                return "Endangered"
+            elif sprot == "PT":
+                return "Threatened"
+            elif sprot == "PR":
+                return "Rare"
+            elif sprot == "PX":
+                return "Extirpated"
+            elif sprot == "PV":
+                return "Vulnerable"
+            elif sprot == "TU":
+                return "Undetermined"
+            else:
+                return sprot
+        species_info_df["SPROT"] = species_info_df["SPROT"].map(map_SPROT)
+
+        # Species List
+        FIND_path = "C:/Users/hyu/Desktop/GIS_projects/FIND_updates_2023.gdb"
+        table_name = "SpeciesList"
+        table_path = arcpy.Describe(f"{FIND_path}/{table_name}").catalogPath
+        all_species_arr = arcpy.da.TableToNumPyArray(table_path, ['elem_name', 'refcode'])
+        all_species_df = pd.DataFrame(all_species_arr)
+        # print(refcode_list)
+        # l = all_species_df['refcode'].tolist()
+        # print(set(refcode_list).intersection(set(l)))
+        # print(sorted(list((set(l)))))
+        all_species_df = all_species_df[all_species_df['refcode'].isin(refcode_list)]
+        all_species_df['elem_name'] = all_species_df['elem_name'].astype('int32')
+        all_species_df = pd.merge(all_species_df, speciesET_df, on="elem_name")
+        # Delete duplicates with same refcode and same elem_name
+        all_species_df = all_species_df.drop_duplicates(subset=['refcode', 'elem_name'])
+
 
         # Generate LaTeX and PDF report
         if not testing:
             property_name = property_name.valueAsText
-        geometry_options = {
-                "margin": "0.5in"
-        }
-        doc = Document(geometry_options=geometry_options)
+        geometry_options = {"margin": "0.5in"}
+        doc = Document(geometry_options=geometry_options) # default page size is US letter
 
         # Create title
         with doc.create(Section(f'{property_name}', numbering=False)):
@@ -170,17 +202,41 @@ class regionData(object):
             for i in range(survey_sites_df.shape[0]):
                 curr_site = survey_sites_df.iloc[i]
                 site_name = curr_site["survey_sit"]
-                site_survey_date = curr_site["survey_start"]
                 site_description = curr_site["site_desc"]
+
                 with doc.create(Section(site_name)) as site:
-                    # Survey start date
-                    site.append(f'Survey date: {site_survey_date} \n')
+                    # Survey date: start - end
+                    site.append(bold('Survey date: '))
+                    site.append(f'{curr_site["survey_start"]} - {curr_site["survey_end"]} \n')
+                    # Surveyors of current survey site
+                    site.append(bold('Surveyors: '))
+                    site.append(f'{curr_site["surveyors"]} \n')
+
+                    site.append(LineBreak())
+
                     # Survey site raw description (directly drawn from FIND)
                     site.append(bold("Site Description: \n"))
                     site.append(f'{site_description} \n')
 
+                    site.append(LineBreak())
+
+                    # Survey site driving direction (drawn from FIND)
+                    site.append(bold("Driving direction: \n"))
+                    site.append(f'{curr_site["drive_direc"]} \n')
+
+                    site.append(LineBreak())
                     # Survey site findings
                     site.append(bold("Findings: \n"))
+                    if curr_site["survey_typ"] != None:
+                        if curr_site["survey_typ"] == "QUAL":
+                            site.append("This is a qualitative survey.\n")
+                        else:
+                            site.append("This is a quantitative survey.\n")
+                    if curr_site["survey_typ_comm"] != None:
+                        site.append(f'Survey type comments: {curr_site["survey_typ_comm"]} \n')
+
+                    site.append(LineBreak())
+
                     # Make a table for species info at this survey site
                     # 1. get the species of the same refcode
                     curr_refcode = curr_site["refcode"]
@@ -192,40 +248,92 @@ class regionData(object):
 
                     if site_found_df.shape[0] == 0 and site_unfound_df.shape[0] == 0:
                         site.append("Our record shows that there are no elements in the area you requested.\n")
-                    elif site_found_df.shape[0] == 0:
-                        site.append("Table of unfounded elements in the area you requested:\n")
-                        with site.create(Tabular(table_spec)) as table:
-                            table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
-                            for j in range(site_unfound_df.shape[0]):
-                                curr_row = site_unfound_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
-                                table.add_hline()
-                                table.add_row(tuple(curr_row))
-                    elif site_unfound_df.shape[0] == 0:
-                        table_spec = "c|" * 4
-                        site.append("Table of found elements in the area you requested:\n")
-                        with site.create(Tabular(table_spec)) as table:
-                            table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
-                            for j in range(site_found_df.shape[0]):
-                                curr_row = site_found_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
-                                table.add_hline()
-                                table.add_row(tuple(curr_row))
                     else:
-                        table_spec = "c|" * 4
-                        site.append("Table of found elements in the area you requested:\n")
-                        with site.create(Tabular(table_spec)) as table:
-                            table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
-                            for j in range(site_found_df.shape[0]):
-                                curr_row = site_found_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
-                                table.add_hline()
-                                table.add_row(tuple(curr_row))
-                        site.append(LineBreak())
-                        site.append("Table of unfounded elements in the area you requested:\n")
-                        with site.create(Tabular(table_spec)) as table:
-                            table.add_row(('SNAME', 'SCOMNAME', 'eo_rank', 'SPROT'))
-                            for j in range(site_unfound_df.shape[0]):
-                                curr_row = site_unfound_df.iloc[j][['SNAME', 'SCOMNAME', 'eo_rank', 'SPROT']]
-                                table.add_hline()
-                                table.add_row(tuple(curr_row))
+                        table_spec = "c|" * 4 + "p{5cm}"
+                        if site_found_df.shape[0] == 0:
+                            site.append("Table of unfounded elements in the area you requested:\n")
+                            site.append(LineBreak())
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row((Command('textbf', 'Common name'),
+                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Population rank *'),
+                                               Command('textbf', 'State status'),
+                                               Command('textbf', 'Where found')))
+                                for j in range(site_unfound_df.shape[0]):
+                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                            site.append(LineBreak())
+                        elif site_unfound_df.shape[0] == 0:
+                            site.append("Table of found elements in the area you requested:\n")
+                            site.append(LineBreak())
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row((Command('textbf', 'Common name'),
+                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Population rank *'),
+                                               Command('textbf', 'State status'),
+                                               Command('textbf', 'Where found')))
+                                for j in range(site_found_df.shape[0]):
+                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                            site.append(LineBreak())
+                        else:
+                            site.append("Table of found elements in the area you requested:\n")
+                            site.append(LineBreak())
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row((Command('textbf', 'Common name'),
+                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Population rank *'),
+                                               Command('textbf', 'State status'),
+                                               Command('textbf', 'Where found')))
+                                for j in range(site_found_df.shape[0]):
+                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                            site.append(LineBreak())
+                            site.append("\n")
+                            site.append("Table of unfounded elements in the area you requested:\n")
+                            site.append(LineBreak())
+                            with site.create(Tabular(table_spec)) as table:
+                                table.add_row((Command('textbf', 'Common name'),
+                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Population rank *'),
+                                               Command('textbf', 'State status'),
+                                               Command('textbf', 'Where found')))
+                                for j in range(site_unfound_df.shape[0]):
+                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    table.add_hline()
+                                    table.add_row(tuple(curr_row))
+                            site.append(LineBreak())
+
+                    site.append(LineBreak())
+                    site.append("\n")
+
+                    # Survey site threat and management recommendations
+                    site.append(bold("Threats and management recommendations: \n"))
+                    site.append(f'{curr_site["threats"]} \n')
+
+                    site.append(LineBreak())
+
+                    # Survey site species list
+                    site.append(bold("Species list: \n"))
+                    site_all_species_df = all_species_df[all_species_df["refcode"] == curr_refcode]
+                    all_species_str = ""
+                    for k in range(site_all_species_df.shape[0]):
+                        curr_species = site_all_species_df.iloc[k]
+                        if curr_species["SCOMNAME"] == "None" and curr_species["SNAME"] == "None":
+                            continue
+                        elif curr_species["SCOMNAME"] == "None":
+                            all_species_str += f'{curr_species["SNAME"]}, '
+                        elif curr_species["SNAME"] == "None":
+                            all_species_str += f'{curr_species["SCOMNAME"]}, '
+                        else:
+                            all_species_str += f'{curr_species["SCOMNAME"]}({curr_species["SNAME"]}), '
+                    all_species_str = all_species_str[:(len(all_species_str)-2)]
+                    site.append(all_species_str)
+
+
 
         doc.generate_tex(filepath=f'{output_pdf_path}' + '/' + f'{property_name}_report')
 
