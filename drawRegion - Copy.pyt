@@ -7,7 +7,7 @@ import subprocess
 
 from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
     Plot, Figure, Matrix, Alignat, MediumText, LineBreak, Head, MiniPage, NoEscape, \
-    LargeText, PageStyle, Command, Itemize
+    LargeText, PageStyle, Command, Itemize, NewPage
 from pylatex.utils import bold, italic
 
 arcpy.env.workspace = "memory"
@@ -200,6 +200,9 @@ class regionData(object):
 
             # Create subsections for survey site descriptions and findings
             for i in range(survey_sites_df.shape[0]):
+                # Newpage for every survey site in the area
+                if i > 0:
+                    doc.append(NewPage())
                 curr_site = survey_sites_df.iloc[i]
                 site_name = curr_site["survey_sit"]
                 site_description = curr_site["site_desc"]
@@ -249,11 +252,13 @@ class regionData(object):
                     if site_found_df.shape[0] == 0 and site_unfound_df.shape[0] == 0:
                         site.append("Our record shows that there are no elements in the area you requested.\n")
                     else:
-                        table_spec = "c|" * 4 + "p{5cm}"
+                        # Fix the width for each column in the findings table
+                        table_spec = "p{3cm}" + "p{4cm}" + "p{2cm}" + "p{3cm}" + "p{5cm}"
                         if site_found_df.shape[0] == 0:
                             site.append("Table of unfounded elements in the area you requested:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
+                                table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
                                                Command('textbf', 'Latin name'),
                                                Command('textbf', 'Population rank *'),
@@ -263,11 +268,13 @@ class regionData(object):
                                     curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
+                                table.add_hline()
                             site.append(LineBreak())
                         elif site_unfound_df.shape[0] == 0:
                             site.append("Table of found elements in the area you requested:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
+                                table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
                                                Command('textbf', 'Latin name'),
                                                Command('textbf', 'Population rank *'),
@@ -277,11 +284,13 @@ class regionData(object):
                                     curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
+                                table.add_hline()
                             site.append(LineBreak())
                         else:
                             site.append("Table of found elements in the area you requested:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
+                                table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
                                                Command('textbf', 'Latin name'),
                                                Command('textbf', 'Population rank *'),
@@ -291,11 +300,13 @@ class regionData(object):
                                     curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
+                                table.add_hline()
                             site.append(LineBreak())
                             site.append("\n")
                             site.append("Table of unfounded elements in the area you requested:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
+                                table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
                                                Command('textbf', 'Latin name'),
                                                Command('textbf', 'Population rank *'),
@@ -305,6 +316,7 @@ class regionData(object):
                                     curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
+                                table.add_hline()
                             site.append(LineBreak())
 
                     site.append(LineBreak())
@@ -321,6 +333,8 @@ class regionData(object):
                     site_all_species_df = all_species_df[all_species_df["refcode"] == curr_refcode]
                     all_species_str = ""
                     for k in range(site_all_species_df.shape[0]):
+                        if k % 3 == 0 and k > 0:
+                            all_species_str += "\n"
                         curr_species = site_all_species_df.iloc[k]
                         if curr_species["SCOMNAME"] == "None" and curr_species["SNAME"] == "None":
                             continue

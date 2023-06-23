@@ -57,14 +57,14 @@ from pylatex import Document
 from pylatex import Package
 from pylatex import Tabu
 import subprocess
-from pylatex import Document, Tabular
+from pylatex import Document, Tabular, NewPage, Section
 
 
 # Create a new document
 doc = Document()
 
 # Create a table with a center-aligned and fixed width column
-table = Tabular('|m{5cm}|c|')
+table = Tabular('|p{5cm}|c|')
 table.add_hline()
 table.add_row(('Center Aligned', 'Column 2'))
 table.add_hline()
@@ -75,6 +75,17 @@ table.add_row((content, 'Value'))
 
 # Add the table to the document
 doc.append(table)
+
+doc.append(NewPage())
+doc.append("It's me, hi, i'm the problem it's me! :)")
+
+# Append long text
+long_text = """
+This is a long paragraph that will automatically wrap around based on the page width and formatting settings in PyLaTeX. 
+You don't need to specify any special settings for text wrapping. PyLaTeX handles it automatically.
+"""
+doc.append(long_text)
+
 
 output_pdf_path = "C:/Users/hyu/Desktop"
 property_name = "hi"
