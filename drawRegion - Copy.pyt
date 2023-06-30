@@ -4,10 +4,12 @@ from getpass import getuser
 import pandas as pd
 import numpy as np
 import subprocess
+import string
+from datetime import datetime
 
 from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
     Plot, Figure, Matrix, Alignat, MediumText, LineBreak, Head, MiniPage, NoEscape, \
-    LargeText, PageStyle, Command, Itemize, NewPage
+    LargeText, PageStyle, Command, Itemize, NewPage, SubFigure
 from pylatex.utils import bold, italic
 
 arcpy.env.workspace = "memory"
@@ -70,20 +72,18 @@ class regionData(object):
         arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
 
-        testing = False
+        testing = True
 
         # Hardcode for testing purposes
         if testing:
-            input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test2"
+            input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test5"
             property_name = "Local Test"
-            output_pdf_path = "C:/Users/hyu/Desktop"
+            output_pdf_path = "C:/Users/hyu/Desktop/pics"
 
         # Survey Site dataframe, address and variables are hardcoded
-        survey_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
+        FIND_path = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
         survey_poly_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb\survey_poly"
-        survey_poly_vars = ['refcode', 'dm_stat', 'survey_start', 'survey_end', 'surveyors', 'survey_sit', 'site_desc',
-                            'site_comm', 'survey_typ', 'survey_typ_comm', 'land_use_in_site','land_use_surr_site',
-                            'threats', 'drive_direc']
+        survey_poly_vars = [field.name for field in arcpy.ListFields(survey_poly_addr)]
         sample_df = pd.DataFrame(data=arcpy.da.SearchCursor(survey_poly_addr, survey_poly_vars),
                                  columns=survey_poly_vars)
 
@@ -108,11 +108,11 @@ class regionData(object):
         # Get refcode list
         refcode_list = (survey_sites_df["refcode"]).tolist()
 
-        el_pt = survey_addr + "\el_pt"
-        el_line = survey_addr + "\el_line"
-        el_poly = survey_addr + "\el_poly"
-        comm_pt = survey_addr + "\comm_pt"
-        comm_poly = survey_addr + "\comm_poly"
+        el_pt = FIND_path + "\el_pt"
+        el_line = FIND_path + "\el_line"
+        el_poly = FIND_path + "\el_poly"
+        comm_pt = FIND_path + "\comm_pt"
+        comm_poly = FIND_path + "\comm_poly"
 
         # Make {el_pt, el_line, el_poly, comm_pt, comm_poly} dataframe on refcode
         el_and_comms = pd.DataFrame()
@@ -126,13 +126,7 @@ class regionData(object):
                 where_clause=where_clause
 
             )
-            if layer in [el_pt, el_line, el_poly]:
-                curr_fields = ['refcode', 'elem_name', 'elem_found', 'elem_found_comm', 'invasive_present',
-                               'pmash_comm',
-                               'eo_size', 'eo_landsc', 'eo_rank', 'eo_rank_comm', 'mgmt_needs', 'protect_needs',
-                               'pmash_condition', 'disturb', 'direc_elem']  # last two are EO_conditions
-            else:
-                curr_fields = [field.name for field in arcpy.ListFields(layer)]
+            curr_fields = [field.name for field in arcpy.ListFields(layer)]
             curr_df = pd.DataFrame(data=arcpy.da.SearchCursor(curr_layer, curr_fields),
                                    columns=curr_fields)
             # Merge curr_df with survey_sites_df
@@ -177,15 +171,40 @@ class regionData(object):
         table_path = arcpy.Describe(f"{FIND_path}/{table_name}").catalogPath
         all_species_arr = arcpy.da.TableToNumPyArray(table_path, ['elem_name', 'refcode'])
         all_species_df = pd.DataFrame(all_species_arr)
-        # print(refcode_list)
-        # l = all_species_df['refcode'].tolist()
-        # print(set(refcode_list).intersection(set(l)))
-        # print(sorted(list((set(l)))))
         all_species_df = all_species_df[all_species_df['refcode'].isin(refcode_list)]
         all_species_df['elem_name'] = all_species_df['elem_name'].astype('int32')
         all_species_df = pd.merge(all_species_df, speciesET_df, on="elem_name")
         # Delete duplicates with same refcode and same elem_name
         all_species_df = all_species_df.drop_duplicates(subset=['refcode', 'elem_name'])
+
+        def importAttachments(output_path, inTable, curr_refcode):
+            if not os.path.exists(output_path + "/" + curr_refcode):
+                os.mkdir(output_path + "/" + curr_refcode)
+            temp_folder = output_path + "/" + curr_refcode
+            db_name = arcpy.Describe(inTable).baseName
+            with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE']) as cursor:
+                # print([field.name for field in arcpy.ListFields(inTable)])
+                counter = 0
+                for item in cursor:
+                    attachment = item[0]
+                    att_name = item[1]
+                    extend_name = (att_name.split("."))[-1]
+                    filename = db_name + str(counter) + f".{extend_name}"
+                    filetype = item[2]
+                    # print(filename, filetype)
+                    if filetype == "image/jpeg":
+                        open(temp_folder + os.sep + filename, 'wb').write(attachment.tobytes())
+                    del item
+                    del filename
+                    del attachment
+                    del filetype
+                    counter += 1
+            return os.listdir(temp_folder)  # return all the images for this site
+
+        def deleteFolder(dirpath):
+            for file in (os.listdir(dirpath)):
+                os.remove(dirpath + os.sep + file)
+            os.rmdir(dirpath)
 
 
         # Generate LaTeX and PDF report
@@ -201,16 +220,79 @@ class regionData(object):
             # Create subsections for survey site descriptions and findings
             for i in range(survey_sites_df.shape[0]):
                 # Newpage for every survey site in the area
-                if i > 0:
-                    doc.append(NewPage())
                 curr_site = survey_sites_df.iloc[i]
                 site_name = curr_site["survey_sit"]
                 site_description = curr_site["site_desc"]
+                curr_refcode = curr_site["refcode"]
 
+                for n in range(len([survey_sites_df, el_and_comms])):
+                    df = [survey_sites_df, el_and_comms][n]
+                    info = df[df['refcode'] == curr_refcode]
+                    globalIDs = (info['GlobalID']).tolist()
+                    if n == 0:
+                        attachment_table = survey_poly_addr + "__ATTACH"
+
+                        formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
+                        if formatted_guids:
+                            sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
+                        else:
+                            # Handle the case when formatted_guids is empty
+                            sql_expression = "OBJECTID < 0"  # This will create a condition that is always false
+
+                        # Create a new table view based on the SQL expression
+                        arcpy.MakeTableView_management(attachment_table, "attachment_view", sql_expression)
+
+                        # Save the view as a new table (subtable)
+                        # result_path = os.path.join(FIND_path, "subtable.dbf")
+                        arcpy.TableToTable_conversion("attachment_view", FIND_path, "subtable")
+
+                    else:
+                        for m in range(len([el_pt, el_line, el_poly, comm_pt, comm_poly])):
+                            subdf = [el_pt, el_line, el_poly, comm_pt, comm_poly][m]
+                            attachments_addr = subdf + "__ATTACH"
+                            curr_att_table = attachments_addr
+
+                            formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
+
+                            if formatted_guids:
+                                sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
+                            else:
+                                # Handle the case when formatted_guids is empty
+                                sql_expression = "ATTACHMENTID < 0"  # This will create a condition that is always false
+
+                            # Create a new table view based on the SQL expression
+                            arcpy.MakeTableView_management(curr_att_table, "temp"+str(m), sql_expression)
+
+                            # Save the view as a new table (subtable)
+                            arcpy.TableToTable_conversion("temp"+str(m), FIND_path, f"temp{m}")
+
+                            # Append current table to the big attachment table
+                            arcpy.Append_management(os.path.join(FIND_path, f"temp{m}"),
+                                                    os.path.join(FIND_path, "subtable"), "NO_TEST")
+
+                            # Delete current table
+                            arcpy.management.Delete(os.path.join(FIND_path, f"temp{m}"))
+
+
+                    # import attachments of the attachments related to curr_refcode
+                curr_attachments = importAttachments(output_pdf_path, os.path.join(FIND_path, "subtable"), curr_refcode)
+                arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
+
+                if i > 0:
+                    doc.append(NewPage())
+
+                if site_name is None:
+                    site_name = f"Unidentified Site: {curr_site['X']} - {curr_site['Y']} (WGS84)"
                 with doc.create(Section(site_name)) as site:
                     # Survey date: start - end
-                    site.append(bold('Survey date: '))
-                    site.append(f'{curr_site["survey_start"]} - {curr_site["survey_end"]} \n')
+                    if curr_site["survey_start"] is not None and not pd.isnull(curr_site["survey_start"]):
+                        site.append(bold('Survey date: '))
+                        reformat_start = (curr_site["survey_start"]).strftime("%m/%d/%Y")
+                        if (curr_site["survey_end"] is None or pd.isnull(curr_site["survey_end"])) and (curr_site["survey_start"] is not None and not pd.isnull(curr_site["survey_start"])):
+                            site.append(f'{reformat_start} \n')
+                        else:
+                            reformat_end = (curr_site["survey_end"]).strftime("%m/%d/%Y")
+                            site.append(f'{reformat_start} - {reformat_end} \n')
                     # Surveyors of current survey site
                     site.append(bold('Surveyors: '))
                     site.append(f'{curr_site["surveyors"]} \n')
@@ -218,14 +300,15 @@ class regionData(object):
                     site.append(LineBreak())
 
                     # Survey site raw description (directly drawn from FIND)
-                    site.append(bold("Site Description: \n"))
+                    site.append(bold("Site description: \n"))
                     site.append(f'{site_description} \n')
 
                     site.append(LineBreak())
 
                     # Survey site driving direction (drawn from FIND)
-                    site.append(bold("Driving direction: \n"))
-                    site.append(f'{curr_site["drive_direc"]} \n')
+                    if curr_site["drive_direc"] is not None:
+                        site.append(bold("Driving directions: \n"))
+                        site.append(f'{curr_site["drive_direc"]} \n')
 
                     site.append(LineBreak())
                     # Survey site findings
@@ -242,7 +325,6 @@ class regionData(object):
 
                     # Make a table for species info at this survey site
                     # 1. get the species of the same refcode
-                    curr_refcode = curr_site["refcode"]
                     site_species_df = species_info_df[species_info_df["refcode"] == curr_refcode]
                     # 2. get all found elements in the area
                     site_found_df = site_species_df[site_species_df["elem_found"] == "Y"]
@@ -250,12 +332,12 @@ class regionData(object):
                     site_unfound_df = site_species_df[site_species_df["elem_found"] == "N"]
 
                     if site_found_df.shape[0] == 0 and site_unfound_df.shape[0] == 0:
-                        site.append("Our record shows that there are no elements in the area you requested.\n")
+                        site.append("No tracked elements were found during this survey.\n")
                     else:
                         # Fix the width for each column in the findings table
                         table_spec = "p{3cm}" + "p{4cm}" + "p{2cm}" + "p{3cm}" + "p{5cm}"
                         if site_found_df.shape[0] == 0:
-                            site.append("Table of unfounded elements in the area you requested:\n")
+                            site.append("Elements that were NOT found during the survey: \n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
@@ -271,7 +353,7 @@ class regionData(object):
                                 table.add_hline()
                             site.append(LineBreak())
                         elif site_unfound_df.shape[0] == 0:
-                            site.append("Table of found elements in the area you requested:\n")
+                            site.append("Elements that were found during the survey: \n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
@@ -287,7 +369,7 @@ class regionData(object):
                                 table.add_hline()
                             site.append(LineBreak())
                         else:
-                            site.append("Table of found elements in the area you requested:\n")
+                            site.append("Elements that were found during the survey: \n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
@@ -303,7 +385,7 @@ class regionData(object):
                                 table.add_hline()
                             site.append(LineBreak())
                             site.append("\n")
-                            site.append("Table of unfounded elements in the area you requested:\n")
+                            site.append("Elements that were NOT found during the survey:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
@@ -318,8 +400,9 @@ class regionData(object):
                                     table.add_row(tuple(curr_row))
                                 table.add_hline()
                             site.append(LineBreak())
+                        site.append("*Populations are ranked using Nature Serve methods. Possible ranks are A=excellent viability; B=good viability; C=fair viability, E=extant, or present on site but not given a viability rank, and F=failed to find. Combination ranks span two categories. For instance, BC indicates “good to fair” viability.\n")
 
-                    site.append(LineBreak())
+                    # site.append(LineBreak())
                     site.append("\n")
 
                     # Survey site threat and management recommendations
@@ -345,9 +428,37 @@ class regionData(object):
                         else:
                             all_species_str += f'{curr_species["SCOMNAME"]}({curr_species["SNAME"]}), '
                     all_species_str = all_species_str[:(len(all_species_str)-2)]
+                    if all_species_str == "":
+                        all_species_str = "A species list was not recorded for this survey."
+                    all_species_str += "\n"
                     site.append(all_species_str)
 
+                    # write the attachments to the report
+                    if len(curr_attachments) > 0:
+                        doc.append(NewPage())
+                        # site.append("\n")
+                        site.append(bold("Attachments: \n"))
+                        # Number of rows and columns
+                        num_rows = len(curr_attachments) // 3
+                        num_cols = [3] * num_rows + [len(curr_attachments) - 3*num_rows]
 
+                        for row in range(num_rows+1):
+                            # Create a single imagesRow
+                            with site.create(Figure(position='h!')) as imagesRow:
+                                # Create a subfigure for each image
+                                for col in range(num_cols[row]):
+                                    print("row, col: ", row, col)
+                                    with imagesRow.create(
+                                            SubFigure(position='c', width=NoEscape(r'0.33\linewidth'))) as subfig:
+                                        # Add the image to the subfigure
+                                        curr_dir = os.path.join(output_pdf_path, curr_refcode)
+                                        img_addr = os.path.join(curr_dir, curr_attachments[row*3 + col])
+                                        subfig.add_image(img_addr, width=NoEscape(r'0.95\linewidth'))
+                                        # Further ideas: add caption for each attachment in the survey site
+                                        # subfig.add_caption('Caption for Image {}'.format(i))
+
+                    # Delete subtable for curr_refcode
+                    arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
 
         doc.generate_tex(filepath=f'{output_pdf_path}' + '/' + f'{property_name}_report')
 
@@ -361,3 +472,9 @@ class regionData(object):
 
         # Execute the LaTeX compiler command and move PDF report to user-specified directory
         subprocess.run(['pdflatex', '-output-directory=' + pdf_file, latex_file])
+
+        # Delete temporary folders
+        for i in range(survey_sites_df.shape[0]):
+            curr_site = survey_sites_df.iloc[i]
+            curr_refcode = curr_site["refcode"]
+            deleteFolder(os.path.join(output_pdf_path, curr_refcode))
