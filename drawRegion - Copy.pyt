@@ -72,7 +72,7 @@ class regionData(object):
         arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
 
-        testing = True
+        testing = False
 
         # Hardcode for testing purposes
         if testing:
@@ -115,22 +115,33 @@ class regionData(object):
         comm_poly = FIND_path + "\comm_poly"
 
         # Make {el_pt, el_line, el_poly, comm_pt, comm_poly} dataframe on refcode
-        el_and_comms = pd.DataFrame()
+        el_and_comms = pd.DataFrame(columns= [field.name for field in arcpy.ListFields(el_pt)])
         for layer in [el_pt, el_line, el_poly, comm_pt, comm_poly]:
-            refcode_str = ', '.join(f"'{code}'" for code in refcode_list)
-            where_clause = f"\"refcode\" IN ({refcode_str})"
-            curr_layer = arcpy.management.SelectLayerByAttribute(
-                in_layer_or_view=layer,
-                selection_type="SUBSET_SELECTION",
-                # where_clause="\"refcode\" IN {}".format(tuple(map(str, refcode_list)))
-                where_clause=where_clause
-
-            )
-            curr_fields = [field.name for field in arcpy.ListFields(layer)]
-            curr_df = pd.DataFrame(data=arcpy.da.SearchCursor(curr_layer, curr_fields),
-                                   columns=curr_fields)
-            # Merge curr_df with survey_sites_df
-            el_and_comms = pd.concat([el_and_comms, curr_df])
+            # refcode_str = ', '.join(f"'{code}'" for code in refcode_list)
+            refcode_str = tuple(refcode_list)
+            # where_clause = f"\"refcode\" IN ({refcode_str})"
+            curr_refcodes = []
+            with arcpy.da.SearchCursor(layer, ["refcode"]) as cursor:
+                for row in cursor:
+                    curr_refcodes.append(row[0])
+            result_refcodes = set.intersection(set(refcode_list), set(curr_refcodes))
+            arcpy.AddMessage(result_refcodes)
+            if result_refcodes != set():
+                if len(result_refcodes) == 1:
+                    ref = list(result_refcodes)[0]
+                    where_clause = "'refcode' = '{}'".format(ref)
+                else:
+                    where_clause = f"'refcode' IN {refcode_str}"
+                curr_layer = arcpy.management.SelectLayerByAttribute(
+                    in_layer_or_view=layer,
+                    selection_type="SUBSET_SELECTION",
+                    # where_clause="\"refcode\" IN {}".format(tuple(map(str, refcode_list)))
+                    where_clause=where_clause)
+                curr_fields = [field.name for field in arcpy.ListFields(layer)]
+                curr_df = pd.DataFrame(data=arcpy.da.SearchCursor(curr_layer, curr_fields),
+                                       columns=curr_fields)
+                # Merge curr_df with survey_sites_df
+                el_and_comms = pd.concat([el_and_comms, curr_df])
 
         # Get species information from Biotics database ET table
         biotics_path = "C:/Users/hyu/Desktop/GIS_projects/Biotics_datasets.gdb"
@@ -142,6 +153,7 @@ class regionData(object):
         speciesET_df.columns = ['elem_name', 'SPROT', 'SNAME', 'SCOMNAME']
         # Merge speciedET_df and el_and_comms based on elem_name(or ELSUBID)
         speciesET_df['elem_name'] = speciesET_df['elem_name'].astype('int32')
+        arcpy.AddMessage(el_and_comms.columns)
         el_and_comms['elem_name'] = el_and_comms['elem_name'].astype('int32')
 
         species_info_df = pd.merge(speciesET_df, el_and_comms, on="elem_name")
@@ -182,14 +194,15 @@ class regionData(object):
                 os.mkdir(output_path + "/" + curr_refcode)
             temp_folder = output_path + "/" + curr_refcode
             db_name = arcpy.Describe(inTable).baseName
-            with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE']) as cursor:
+            with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE', 'attach_name']) as cursor:
                 # print([field.name for field in arcpy.ListFields(inTable)])
                 counter = 0
                 for item in cursor:
                     attachment = item[0]
                     att_name = item[1]
                     extend_name = (att_name.split("."))[-1]
-                    filename = db_name + str(counter) + f".{extend_name}"
+                    real_att_name = item[3]
+                    filename = real_att_name + "~" + str(counter) + f".{extend_name}"
                     filetype = item[2]
                     # print(filename, filetype)
                     if filetype == "image/jpeg":
@@ -205,6 +218,32 @@ class regionData(object):
             for file in (os.listdir(dirpath)):
                 os.remove(dirpath + os.sep + file)
             os.rmdir(dirpath)
+
+        def addNameFieldAttachmentTable(feature_layer, inTableFieldName):
+            # input 1: local path to feature class (survey_poly, el_pt, el_line, el_poly, comm_pt, comm_poly)
+            # input 2: field names that represent attachment name, e.g. survey_sit, elem_name
+            attachment_table = feature_layer + "__ATTACH"
+            arcpy.management.AddField(attachment_table, "attach_name", "TEXT")
+            with arcpy.da.UpdateCursor(attachment_table, ["REL_GLOBALID", "attach_name"]) as att_cursor:
+                for att_row in att_cursor:
+                    rel_guid = att_row[0]
+                    with arcpy.da.SearchCursor(feature_layer, ["GlobalID", inTableFieldName]) as temp_cursor:
+                        if rel_guid == temp_cursor[0]:
+                            # insert attachment_name to attachment table if IDs match
+                            if feature_layer == survey_poly_addr:
+                                att_row[1] = "site~" + temp_cursor[1]
+                            else:
+                                att_row[1] = temp_cursor[1]
+                            cursor.updateRow(row)
+
+        # update attachment tables in advance, and use updated tables to perform SQL query in layer intersection
+        for feature_layer in [survey_poly_addr, el_line, el_poly, comm_pt, comm_poly]:
+            if feature_layer == survey_poly_addr:
+                addNameFieldAttachmentTable(feature_layer, "survey_sit")
+            else:
+                addNameFieldAttachmentTable(feature_layer, "elem_name")
+
+        # Delete name fields afterwards here
 
 
         # Generate LaTeX and PDF report
@@ -229,10 +268,24 @@ class regionData(object):
                     df = [survey_sites_df, el_and_comms][n]
                     info = df[df['refcode'] == curr_refcode]
                     globalIDs = (info['GlobalID']).tolist()
+                    formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
+                    # print("formatted_guids:", formatted_guids)
+                    # str_globalIDs = [format(guid) for guid in globalIDs]
                     if n == 0:
                         attachment_table = survey_poly_addr + "__ATTACH"
 
-                        formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
+                        # Add a temporary field to hold the names for each site
+                        arcpy.management.AddField(attachment_table, "attach_name", "TEXT")
+                        with arcpy.da.UpdateCursor(attachment_table, ["REL_GLOBALID", "attach_name"]) as cursor:
+                            for row in cursor:
+                                rel_guid = row[0]
+                                # print("rel_guid:", rel_guid)
+                                # if str(rel_guid) in str_globalIDs:
+                                if rel_guid in globalIDs:
+                                    row[1] = "site~" + ((survey_sites_df[survey_sites_df['GlobalID'] == rel_guid])['survey_sit']).iloc[0]
+                                    print("enter:\n", (row[1]))
+                                    cursor.updateRow(row)
+
                         if formatted_guids:
                             sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
                         else:
@@ -252,7 +305,15 @@ class regionData(object):
                             attachments_addr = subdf + "__ATTACH"
                             curr_att_table = attachments_addr
 
-                            formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
+                            # Add a temporary field to hold the names for each site
+                            arcpy.management.AddField(curr_att_table, "attach_name", "TEXT")
+                            with arcpy.da.UpdateCursor(curr_att_table, ["REL_GLOBALID", "attach_name"]) as cursor:
+                                for row in cursor:
+                                    rel_guid = row[0]
+                                    if rel_guid in globalIDs:
+                                        row[1] = ((el_and_comms[el_and_comms['GlobalID'] == rel_guid])['elem_name']).iloc[0]
+                                        cursor.updateRow(row)
+
 
                             if formatted_guids:
                                 sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
@@ -282,7 +343,7 @@ class regionData(object):
                     doc.append(NewPage())
 
                 if site_name is None:
-                    site_name = f"Unidentified Site: {curr_site['X']} - {curr_site['Y']} (WGS84)"
+                    site_name = f"Unidentified Site: ({curr_site['X']}, {curr_site['Y']}) (WGS84)"
                 with doc.create(Section(site_name)) as site:
                     # Survey date: start - end
                     if curr_site["survey_start"] is not None and not pd.isnull(curr_site["survey_start"]):
@@ -342,7 +403,7 @@ class regionData(object):
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
-                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Scientific name'),
                                                Command('textbf', 'Population rank *'),
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
@@ -358,7 +419,7 @@ class regionData(object):
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
-                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Scientific name'),
                                                Command('textbf', 'Population rank *'),
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
@@ -374,7 +435,7 @@ class regionData(object):
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
-                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Scientific name'),
                                                Command('textbf', 'Population rank *'),
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
@@ -385,12 +446,13 @@ class regionData(object):
                                 table.add_hline()
                             site.append(LineBreak())
                             site.append("\n")
+                            site.append("\n")
                             site.append("Elements that were NOT found during the survey:\n")
                             site.append(LineBreak())
                             with site.create(Tabular(table_spec)) as table:
                                 table.add_hline()
                                 table.add_row((Command('textbf', 'Common name'),
-                                               Command('textbf', 'Latin name'),
+                                               Command('textbf', 'Scientific name'),
                                                Command('textbf', 'Population rank *'),
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
@@ -426,7 +488,7 @@ class regionData(object):
                         elif curr_species["SNAME"] == "None":
                             all_species_str += f'{curr_species["SCOMNAME"]}, '
                         else:
-                            all_species_str += f'{curr_species["SCOMNAME"]}({curr_species["SNAME"]}), '
+                            all_species_str += f'{curr_species["SCOMNAME"]} ({curr_species["SNAME"]}), '
                     all_species_str = all_species_str[:(len(all_species_str)-2)]
                     if all_species_str == "":
                         all_species_str = "A species list was not recorded for this survey."
@@ -447,15 +509,30 @@ class regionData(object):
                             with site.create(Figure(position='h!')) as imagesRow:
                                 # Create a subfigure for each image
                                 for col in range(num_cols[row]):
-                                    print("row, col: ", row, col)
+                                    # print("row, col: ", row, col)
                                     with imagesRow.create(
                                             SubFigure(position='c', width=NoEscape(r'0.33\linewidth'))) as subfig:
                                         # Add the image to the subfigure
                                         curr_dir = os.path.join(output_pdf_path, curr_refcode)
                                         img_addr = os.path.join(curr_dir, curr_attachments[row*3 + col])
                                         subfig.add_image(img_addr, width=NoEscape(r'0.95\linewidth'))
-                                        # Further ideas: add caption for each attachment in the survey site
-                                        # subfig.add_caption('Caption for Image {}'.format(i))
+                                        # Add caption for each attachment in the survey site
+                                        att_name_parts = (curr_attachments[row*3 + col]).split("~")
+                                        if att_name_parts[0] == "site":
+                                            # Indicate this is an attachment for survey site
+                                            curr_att_name = att_name_parts[1]
+                                        else:
+                                            # Indicate this is an attachment for an element
+                                            curr_SNAME = ((speciesET_df[speciesET_df['elem_name'] == int(att_name_parts[0])])['SNAME']).iloc[0]
+                                            curr_SCOMNAME = ((speciesET_df[speciesET_df['elem_name'] == int(att_name_parts[0])])['SCOMNAME']).iloc[0]
+                                            if curr_SNAME is None or curr_SNAME == "None":
+                                                curr_att_name = curr_SCOMNAME
+                                            elif curr_SCOMNAME is None or curr_SCOMNAME == "None":
+                                                curr_att_name = curr_SNAME
+                                            else:
+                                                curr_att_name = f'{curr_SCOMNAME} ({curr_SNAME})'
+                                        print(f'From {att_name_parts}, the name of this attachment is {curr_att_name}')
+                                        subfig.add_caption('{}'.format(curr_att_name))
 
                     # Delete subtable for curr_refcode
                     arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
@@ -478,3 +555,8 @@ class regionData(object):
             curr_site = survey_sites_df.iloc[i]
             curr_refcode = curr_site["refcode"]
             deleteFolder(os.path.join(output_pdf_path, curr_refcode))
+
+        ATTACH_tables = [survey_poly_addr+"__ATTACH", el_pt+"__ATTACH", el_line+"__ATTACH",
+                         el_poly+"__ATTACH", comm_pt+"__ATTACH", comm_poly+"__ATTACH"]
+        for table in ATTACH_tables:
+            arcpy.management.DeleteField(table, ["attach_name"])
