@@ -84,8 +84,8 @@ class regionData(object):
         FIND_path = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
         survey_poly_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb\survey_poly"
         survey_poly_vars = [field.name for field in arcpy.ListFields(survey_poly_addr)]
-        sample_df = pd.DataFrame(data=arcpy.da.SearchCursor(survey_poly_addr, survey_poly_vars),
-                                 columns=survey_poly_vars)
+        # sample_df = pd.DataFrame(data=arcpy.da.SearchCursor(survey_poly_addr, survey_poly_vars),
+        #                          columns=survey_poly_vars)
 
         # Make feature layer for survey_poly
         arcpy.MakeFeatureLayer_management(survey_poly_addr, "survey_sites_lyr")
@@ -115,7 +115,7 @@ class regionData(object):
         comm_poly = FIND_path + "\comm_poly"
 
         # Make {el_pt, el_line, el_poly, comm_pt, comm_poly} dataframe on refcode
-        el_and_comms = pd.DataFrame(columns= [field.name for field in arcpy.ListFields(el_pt)])
+        el_and_comms = pd.DataFrame(columns=[field.name for field in arcpy.ListFields(el_pt)])
         for layer in [el_pt, el_line, el_poly, comm_pt, comm_poly]:
             # refcode_str = ', '.join(f"'{code}'" for code in refcode_list)
             refcode_str = tuple(refcode_list)
@@ -125,13 +125,17 @@ class regionData(object):
                 for row in cursor:
                     curr_refcodes.append(row[0])
             result_refcodes = set.intersection(set(refcode_list), set(curr_refcodes))
-            arcpy.AddMessage(result_refcodes)
+            del cursor
+            # arcpy.AddMessage(result_refcodes)
             if result_refcodes != set():
                 if len(result_refcodes) == 1:
-                    ref = list(result_refcodes)[0]
-                    where_clause = "'refcode' = '{}'".format(ref)
+                    # ref = list(result_refcodes)[0]
+                    # where_clause = "'refcode' = '{}'".format(ref)
+                    formatted_refcode = ["'{}'".format(guid) for guid in refcode_list]
+                    where_clause = "refcode IN ({})".format(",".join(formatted_refcode))
                 else:
-                    where_clause = f"'refcode' IN {refcode_str}"
+                    formatted_refcode = ["'{}'".format(guid) for guid in refcode_list]
+                    where_clause = "refcode IN ({})".format(",".join(formatted_refcode))
                 curr_layer = arcpy.management.SelectLayerByAttribute(
                     in_layer_or_view=layer,
                     selection_type="SUBSET_SELECTION",
@@ -153,7 +157,6 @@ class regionData(object):
         speciesET_df.columns = ['elem_name', 'SPROT', 'SNAME', 'SCOMNAME']
         # Merge speciedET_df and el_and_comms based on elem_name(or ELSUBID)
         speciesET_df['elem_name'] = speciesET_df['elem_name'].astype('int32')
-        arcpy.AddMessage(el_and_comms.columns)
         el_and_comms['elem_name'] = el_and_comms['elem_name'].astype('int32')
 
         species_info_df = pd.merge(speciesET_df, el_and_comms, on="elem_name")
@@ -190,19 +193,20 @@ class regionData(object):
         all_species_df = all_species_df.drop_duplicates(subset=['refcode', 'elem_name'])
 
         def importAttachments(output_path, inTable, curr_refcode):
+            if curr_refcode is None:
+                return []
             if not os.path.exists(output_path + "/" + curr_refcode):
                 os.mkdir(output_path + "/" + curr_refcode)
             temp_folder = output_path + "/" + curr_refcode
             db_name = arcpy.Describe(inTable).baseName
-            with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE', 'attach_name']) as cursor:
+            with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE']) as cursor:
                 # print([field.name for field in arcpy.ListFields(inTable)])
                 counter = 0
                 for item in cursor:
                     attachment = item[0]
                     att_name = item[1]
                     extend_name = (att_name.split("."))[-1]
-                    real_att_name = item[3]
-                    filename = real_att_name + "~" + str(counter) + f".{extend_name}"
+                    filename = db_name + str(counter) + f".{extend_name}"
                     filetype = item[2]
                     # print(filename, filetype)
                     if filetype == "image/jpeg":
@@ -219,38 +223,61 @@ class regionData(object):
                 os.remove(dirpath + os.sep + file)
             os.rmdir(dirpath)
 
-        def addNameFieldAttachmentTable(feature_layer, inTableFieldName):
+        def addNameFieldSingleAttachmentTable(feature_layer, inTableFieldName):
             # input 1: local path to feature class (survey_poly, el_pt, el_line, el_poly, comm_pt, comm_poly)
             # input 2: field names that represent attachment name, e.g. survey_sit, elem_name
-            attachment_table = feature_layer + "__ATTACH"
-            arcpy.management.AddField(attachment_table, "attach_name", "TEXT")
-            with arcpy.da.UpdateCursor(attachment_table, ["REL_GLOBALID", "attach_name"]) as att_cursor:
+            att_table = feature_layer + "__ATTACH"
+            arcpy.management.AddField(att_table, "attach_name", "TEXT")
+            with arcpy.da.UpdateCursor(att_table, ["REL_GLOBALID", "attach_name"]) as att_cursor:
                 for att_row in att_cursor:
                     rel_guid = att_row[0]
-                    with arcpy.da.SearchCursor(feature_layer, ["GlobalID", inTableFieldName]) as temp_cursor:
-                        if rel_guid == temp_cursor[0]:
-                            # insert attachment_name to attachment table if IDs match
-                            if feature_layer == survey_poly_addr:
-                                att_row[1] = "site~" + temp_cursor[1]
-                            else:
-                                att_row[1] = temp_cursor[1]
-                            cursor.updateRow(row)
+                    features = ["GlobalID"]+inTableFieldName
+                    with arcpy.da.SearchCursor(feature_layer, features) as temp_cursor:
+                        for temp_row in temp_cursor:
+                            if rel_guid == temp_row[0]:
+                                # insert attachment_name to attachment table if IDs match
+                                if feature_layer == survey_poly_addr:
+                                    if temp_row[1] is None:
+                                        att_row[1] = "site~" + f'Site coordinate: ({temp_row[2]}, {temp_row[3]})'
+                                    else:
+                                        att_row[1] = "site~" + temp_row[1]
+                                else:
+                                    if temp_row[1] is None:
+                                        att_row[1] = "Unidentified element"
+                                        # print("Adding name for element: Unidentified element")
+                                    else:
+                                        # print("Adding name for element:", ((speciesET_df[speciesET_df['elem_name'] == int(temp_row[1])])['SNAME']))
+                                        att_row[1] = temp_row[1]
+                                att_cursor.updateRow(att_row)
+                    del temp_cursor
+            del att_cursor
 
         # update attachment tables in advance, and use updated tables to perform SQL query in layer intersection
-        for feature_layer in [survey_poly_addr, el_line, el_poly, comm_pt, comm_poly]:
-            if feature_layer == survey_poly_addr:
-                addNameFieldAttachmentTable(feature_layer, "survey_sit")
-            else:
-                addNameFieldAttachmentTable(feature_layer, "elem_name")
+        def addNameFieldAllAttachmentTable():
+            for feature_layer in [survey_poly_addr, el_pt, el_line, el_poly, comm_pt, comm_poly]:
+                if feature_layer == survey_poly_addr:
+                    addNameFieldSingleAttachmentTable(feature_layer, ["survey_sit", "X", "Y"])
+                else:
+                    addNameFieldSingleAttachmentTable(feature_layer, ["elem_name"])
 
         # Delete name fields afterwards here
+        def deleteNameFieldSingleAttachmentTable(feature_layer, inTableFieldName):
+            att_table = feature_layer + "__ATTACH"
+            arcpy.management.DeleteField(att_table, [inTableFieldName])
 
+        def deleteNameFieldAllAttachmentTable():
+            for feature_layer in [survey_poly_addr, el_pt, el_line, el_poly, comm_pt, comm_poly]:
+                deleteNameFieldSingleAttachmentTable(feature_layer, "attach_name")
+
+        addNameFieldAllAttachmentTable()
+        print("Successfully added names for all attachment tables ...")
 
         # Generate LaTeX and PDF report
         if not testing:
             property_name = property_name.valueAsText
+
         geometry_options = {"margin": "0.5in"}
-        doc = Document(geometry_options=geometry_options) # default page size is US letter
+        doc = Document(geometry_options=geometry_options)  # default page size is US letter
 
         # Create title
         with doc.create(Section(f'{property_name}', numbering=False)):
@@ -269,31 +296,22 @@ class regionData(object):
                     info = df[df['refcode'] == curr_refcode]
                     globalIDs = (info['GlobalID']).tolist()
                     formatted_guids = ["'{}'".format(guid) for guid in globalIDs]
-                    # print("formatted_guids:", formatted_guids)
-                    # str_globalIDs = [format(guid) for guid in globalIDs]
+                    print(formatted_guids)
                     if n == 0:
                         attachment_table = survey_poly_addr + "__ATTACH"
 
-                        # Add a temporary field to hold the names for each site
-                        arcpy.management.AddField(attachment_table, "attach_name", "TEXT")
-                        with arcpy.da.UpdateCursor(attachment_table, ["REL_GLOBALID", "attach_name"]) as cursor:
-                            for row in cursor:
-                                rel_guid = row[0]
-                                # print("rel_guid:", rel_guid)
-                                # if str(rel_guid) in str_globalIDs:
-                                if rel_guid in globalIDs:
-                                    row[1] = "site~" + ((survey_sites_df[survey_sites_df['GlobalID'] == rel_guid])['survey_sit']).iloc[0]
-                                    print("enter:\n", (row[1]))
-                                    cursor.updateRow(row)
-
                         if formatted_guids:
-                            sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
+                            sql_expression = "REL_GLOBALID IN ({0})".format(",".join(formatted_guids))
                         else:
                             # Handle the case when formatted_guids is empty
-                            sql_expression = "OBJECTID < 0"  # This will create a condition that is always false
+                            sql_expression = "1 < 0"  # This will create a condition that is always false
 
                         # Create a new table view based on the SQL expression
                         arcpy.MakeTableView_management(attachment_table, "attachment_view", sql_expression)
+                        with arcpy.da.SearchCursor("attachment_view", ["REL_GLOBALID"]) as cursor:
+                            for row in cursor:
+                                print("rel global id:", row[0])
+                        del cursor
 
                         # Save the view as a new table (subtable)
                         # result_path = os.path.join(FIND_path, "subtable.dbf")
@@ -305,27 +323,22 @@ class regionData(object):
                             attachments_addr = subdf + "__ATTACH"
                             curr_att_table = attachments_addr
 
-                            # Add a temporary field to hold the names for each site
-                            arcpy.management.AddField(curr_att_table, "attach_name", "TEXT")
-                            with arcpy.da.UpdateCursor(curr_att_table, ["REL_GLOBALID", "attach_name"]) as cursor:
-                                for row in cursor:
-                                    rel_guid = row[0]
-                                    if rel_guid in globalIDs:
-                                        row[1] = ((el_and_comms[el_and_comms['GlobalID'] == rel_guid])['elem_name']).iloc[0]
-                                        cursor.updateRow(row)
-
-
                             if formatted_guids:
-                                sql_expression = "REL_GLOBALID IN ({})".format(",".join(formatted_guids))
+                                sql_expression = "REL_GLOBALID IN ({0})".format(",".join(formatted_guids))
                             else:
                                 # Handle the case when formatted_guids is empty
-                                sql_expression = "ATTACHMENTID < 0"  # This will create a condition that is always false
+                                sql_expression = "1 < 0"  # This will create a condition that is always false
 
                             # Create a new table view based on the SQL expression
-                            arcpy.MakeTableView_management(curr_att_table, "temp"+str(m), sql_expression)
+                            arcpy.MakeTableView_management(curr_att_table, "temp" + str(m), sql_expression)
+
+                            with arcpy.da.SearchCursor("temp" + str(m), ["REL_GLOBALID"]) as cursor:
+                                for row in cursor:
+                                    print("rel global id:", row[0])
+                            del cursor
 
                             # Save the view as a new table (subtable)
-                            arcpy.TableToTable_conversion("temp"+str(m), FIND_path, f"temp{m}")
+                            arcpy.TableToTable_conversion("temp" + str(m), FIND_path, f"temp{m}")
 
                             # Append current table to the big attachment table
                             arcpy.Append_management(os.path.join(FIND_path, f"temp{m}"),
@@ -334,10 +347,10 @@ class regionData(object):
                             # Delete current table
                             arcpy.management.Delete(os.path.join(FIND_path, f"temp{m}"))
 
-
                     # import attachments of the attachments related to curr_refcode
                 curr_attachments = importAttachments(output_pdf_path, os.path.join(FIND_path, "subtable"), curr_refcode)
                 arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
+
 
                 if i > 0:
                     doc.append(NewPage())
@@ -556,7 +569,4 @@ class regionData(object):
             curr_refcode = curr_site["refcode"]
             deleteFolder(os.path.join(output_pdf_path, curr_refcode))
 
-        ATTACH_tables = [survey_poly_addr+"__ATTACH", el_pt+"__ATTACH", el_line+"__ATTACH",
-                         el_poly+"__ATTACH", comm_pt+"__ATTACH", comm_poly+"__ATTACH"]
-        for table in ATTACH_tables:
-            arcpy.management.DeleteField(table, ["attach_name"])
+        deleteNameFieldAllAttachmentTable()
