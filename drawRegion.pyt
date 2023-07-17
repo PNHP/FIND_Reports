@@ -1,21 +1,32 @@
+# Name: FIND Report Generator
+# Purpose: Allow users draw polygons on ArcGIS maps and automatically generate a PDF report that includes FIND
+#          information of survey sites that covered by the user-drawn polygon
+# Author: Helena Yu
+# Created: 07/17/2023
+# Updates:
+# --------------------
+# Extensibility: FIND and Biotics database paths are hardcoded locally, which need to be modified to match local paths
+#                on different computers:
+#                1. FIND_path: local path to FIND database
+#                2. biotics_path: local path to Biotics database
+#
+
+# Import modules
 import arcpy
 import os
-from getpass import getuser
 import pandas as pd
-import numpy as np
 import subprocess
-import string
-from datetime import datetime
-
-from pylatex import Document, Section, Subsection, Tabular, Math, TikZ, Axis, \
-    Plot, Figure, Matrix, Alignat, MediumText, LineBreak, Head, MiniPage, NoEscape, \
+from pylatex import Document, Section, Subsection, Tabular, Math, \
+    Figure, Matrix, Alignat, LineBreak, Head, MiniPage, NoEscape, \
     LargeText, PageStyle, Command, Itemize, NewPage, SubFigure
 from pylatex.utils import bold, italic
 
+# Set tools to overwrite existing outputs
 arcpy.env.workspace = "memory"
 arcpy.env.overwriteOutput = True
 
 
+# Begin toolbox
 class Toolbox(object):
     def __init__(self):
         self.label = "draw region"
@@ -72,8 +83,12 @@ class regionData(object):
         arcpy.AddMessage(f'You are generating report for {property_name.valueAsText}...')
         output_pdf_path = params[2].valueAsText
 
-        testing = False
+        # Initialize local geodatabase paths
+        FIND_path = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
+        biotics_path = "C:/Users/hyu/Desktop/GIS_projects/Biotics_datasets.gdb"
 
+
+        testing = False
         # Hardcode for testing purposes
         if testing:
             input_lyr = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\FIND_updates_2023.gdb\\test5"
@@ -81,11 +96,9 @@ class regionData(object):
             output_pdf_path = "C:/Users/hyu/Desktop/pics"
 
         # Survey Site dataframe, address and variables are hardcoded
-        FIND_path = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb"
-        survey_poly_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb\survey_poly"
+        # survey_poly_addr = r"C:\Users\hyu\Desktop\GIS_projects\FIND_updates_2023.gdb\survey_poly"
+        survey_poly_addr = os.path.join(FIND_path, "survey_poly")
         survey_poly_vars = [field.name for field in arcpy.ListFields(survey_poly_addr)]
-        sample_df = pd.DataFrame(data=arcpy.da.SearchCursor(survey_poly_addr, survey_poly_vars),
-                                 columns=survey_poly_vars)
 
         # Make feature layer for survey_poly
         arcpy.MakeFeatureLayer_management(survey_poly_addr, "survey_sites_lyr")
@@ -108,25 +121,22 @@ class regionData(object):
         # Get refcode list
         refcode_list = (survey_sites_df["refcode"]).tolist()
 
-        el_pt = FIND_path + "\el_pt"
-        el_line = FIND_path + "\el_line"
-        el_poly = FIND_path + "\el_poly"
-        comm_pt = FIND_path + "\comm_pt"
-        comm_poly = FIND_path + "\comm_poly"
+        el_pt = os.path.join(FIND_path, "\el_pt")
+        el_line = os.path.join(FIND_path, "\el_line")
+        el_poly = os.path.join(FIND_path, "\el_poly")
+        comm_pt = os.path.join(FIND_path, "\comm_pt")
+        comm_poly = os.path.join(FIND_path, "\comm_poly")
 
         # Make {el_pt, el_line, el_poly, comm_pt, comm_poly} dataframe on refcode
         el_and_comms = pd.DataFrame(columns=[field.name for field in arcpy.ListFields(el_pt)])
         for layer in [el_pt, el_line, el_poly, comm_pt, comm_poly]:
-            # refcode_str = ', '.join(f"'{code}'" for code in refcode_list)
-            refcode_str = tuple(refcode_list)
-            # where_clause = f"\"refcode\" IN ({refcode_str})"
             curr_refcodes = []
             with arcpy.da.SearchCursor(layer, ["refcode"]) as cursor:
                 for row in cursor:
                     curr_refcodes.append(row[0])
             result_refcodes = set.intersection(set(refcode_list), set(curr_refcodes))
             del cursor
-            # arcpy.AddMessage(result_refcodes)
+
             if result_refcodes != set():
                 if len(result_refcodes) == 1:
                     formatted_refcode = ["'{}'".format(guid) for guid in refcode_list]
@@ -137,7 +147,6 @@ class regionData(object):
                 curr_layer = arcpy.management.SelectLayerByAttribute(
                     in_layer_or_view=layer,
                     selection_type="SUBSET_SELECTION",
-                    # where_clause="\"refcode\" IN {}".format(tuple(map(str, refcode_list)))
                     where_clause=where_clause)
                 curr_fields = [field.name for field in arcpy.ListFields(layer)]
                 curr_df = pd.DataFrame(data=arcpy.da.SearchCursor(curr_layer, curr_fields),
@@ -146,7 +155,6 @@ class regionData(object):
                 el_and_comms = pd.concat([el_and_comms, curr_df])
 
         # Get species information from Biotics database ET table
-        biotics_path = "C:/Users/hyu/Desktop/GIS_projects/Biotics_datasets.gdb"
         table_name = "ET"
         table_path = arcpy.Describe(f"{biotics_path}/{table_name}").catalogPath
         ET_arr = arcpy.da.TableToNumPyArray(table_path, ['ELSUBID', 'SPROT', 'SNAME', 'SCOMNAME'])
@@ -179,7 +187,6 @@ class regionData(object):
         species_info_df["SPROT"] = species_info_df["SPROT"].map(map_SPROT)
 
         # Species List
-        FIND_path = "C:/Users/hyu/Desktop/GIS_projects/FIND_updates_2023.gdb"
         table_name = "SpeciesList"
         table_path = arcpy.Describe(f"{FIND_path}/{table_name}").catalogPath
         all_species_arr = arcpy.da.TableToNumPyArray(table_path, ['elem_name', 'refcode'])
@@ -198,7 +205,6 @@ class regionData(object):
             temp_folder = output_path + "/" + curr_refcode
             db_name = arcpy.Describe(inTable).baseName
             with arcpy.da.SearchCursor(inTable, ['DATA', 'ATT_NAME', 'CONTENT_TYPE']) as cursor:
-                # print([field.name for field in arcpy.ListFields(inTable)])
                 counter = 0
                 for item in cursor:
                     attachment = item[0]
@@ -206,7 +212,6 @@ class regionData(object):
                     extend_name = (att_name.split("."))[-1]
                     filename = db_name + str(counter) + f".{extend_name}"
                     filetype = item[2]
-                    # print(filename, filetype)
                     if filetype == "image/jpeg":
                         open(temp_folder + os.sep + filename, 'wb').write(attachment.tobytes())
                     del item
@@ -221,10 +226,10 @@ class regionData(object):
                 os.remove(dirpath + os.sep + file)
             os.rmdir(dirpath)
 
-
         # Generate LaTeX and PDF report
         if not testing:
             property_name = property_name.valueAsText
+
         geometry_options = {"margin": "0.5in"}
         doc = Document(geometry_options=geometry_options) # default page size is US letter
 
@@ -264,7 +269,6 @@ class regionData(object):
                         del cursor
 
                         # Save the view as a new table (subtable)
-                        # result_path = os.path.join(FIND_path, "subtable.dbf")
                         arcpy.TableToTable_conversion("attachment_view", FIND_path, "subtable")
 
                     else:
@@ -287,7 +291,6 @@ class regionData(object):
                                     print("rel global id:", row[0])
                             del cursor
 
-
                             # Save the view as a new table (subtable)
                             arcpy.TableToTable_conversion("temp"+str(m), FIND_path, f"temp{m}")
 
@@ -298,12 +301,9 @@ class regionData(object):
                             # Delete current table
                             arcpy.management.Delete(os.path.join(FIND_path, f"temp{m}"))
 
-
                     # import attachments of the attachments related to curr_refcode
                 curr_attachments = importAttachments(output_pdf_path, os.path.join(FIND_path, "subtable"), curr_refcode)
                 arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
-
-
 
                 if i > 0:
                     doc.append(NewPage())
@@ -315,7 +315,10 @@ class regionData(object):
                     if curr_site["survey_start"] is not None and not pd.isnull(curr_site["survey_start"]):
                         site.append(bold('Survey date: '))
                         reformat_start = (curr_site["survey_start"]).strftime("%m/%d/%Y")
-                        if (curr_site["survey_end"] is None or pd.isnull(curr_site["survey_end"])) and (curr_site["survey_start"] is not None and not pd.isnull(curr_site["survey_start"])):
+                        if (curr_site["survey_end"] is None
+                            or pd.isnull(curr_site["survey_end"])) \
+                                and (curr_site["survey_start"] is not None
+                                     and not pd.isnull(curr_site["survey_start"])):
                             site.append(f'{reformat_start} \n')
                         else:
                             reformat_end = (curr_site["survey_end"]).strftime("%m/%d/%Y")
@@ -340,12 +343,12 @@ class regionData(object):
                     site.append(LineBreak())
                     # Survey site findings
                     site.append(bold("Findings: \n"))
-                    if curr_site["survey_typ"] != None:
+                    if curr_site["survey_typ"] is not None:
                         if curr_site["survey_typ"] == "QUAL":
                             site.append("This is a qualitative survey.\n")
                         else:
                             site.append("This is a quantitative survey.\n")
-                    if curr_site["survey_typ_comm"] != None:
+                    if curr_site["survey_typ_comm"] is not None:
                         site.append(f'Survey type comments: {curr_site["survey_typ_comm"]} \n')
 
                     site.append(LineBreak())
@@ -374,7 +377,8 @@ class regionData(object):
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
                                 for j in range(site_unfound_df.shape[0]):
-                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT',
+                                                                        'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
                                 table.add_hline()
@@ -390,7 +394,8 @@ class regionData(object):
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
                                 for j in range(site_found_df.shape[0]):
-                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT',
+                                                                      'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
                                 table.add_hline()
@@ -406,7 +411,8 @@ class regionData(object):
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
                                 for j in range(site_found_df.shape[0]):
-                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    curr_row = site_found_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT',
+                                                                      'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
                                 table.add_hline()
@@ -422,7 +428,8 @@ class regionData(object):
                                                Command('textbf', 'State status'),
                                                Command('textbf', 'Where found')))
                                 for j in range(site_unfound_df.shape[0]):
-                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT', 'direc_elem']]
+                                    curr_row = site_unfound_df.iloc[j][['SCOMNAME', 'SNAME', 'eo_rank', 'SPROT',
+                                                                        'direc_elem']]
                                     table.add_hline()
                                     table.add_row(tuple(curr_row))
                                 table.add_hline()
@@ -481,8 +488,6 @@ class regionData(object):
                                         curr_dir = os.path.join(output_pdf_path, curr_refcode)
                                         img_addr = os.path.join(curr_dir, curr_attachments[row*3 + col])
                                         subfig.add_image(img_addr, width=NoEscape(r'0.95\linewidth'))
-                                        # Further ideas: add caption for each attachment in the survey site
-                                        # subfig.add_caption('Caption for Image {}'.format(i))
 
                     # Delete subtable for curr_refcode
                     arcpy.management.Delete(os.path.join(FIND_path, "subtable"))
@@ -500,7 +505,7 @@ class regionData(object):
         # Execute the LaTeX compiler command and move PDF report to user-specified directory
         subprocess.run(['pdflatex', '-output-directory=' + pdf_file, latex_file])
 
-        # Delete temporary folders
+        # Delete temporary attachment folders
         for i in range(survey_sites_df.shape[0]):
             curr_site = survey_sites_df.iloc[i]
             curr_refcode = curr_site["refcode"]
