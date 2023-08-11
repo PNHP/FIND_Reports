@@ -17,6 +17,7 @@ import os
 import pandas as pd
 import numpy as np
 from datetime import datetime as dt
+import matplotlib.pyplot as plt
 
 # Initialize local geodatabase paths (modify for extensibility)
 NHA_path = r"C:\\Users\\hyu\\Desktop\\GIS_projects\\NHA.gdb"
@@ -227,3 +228,43 @@ arcpy.management.Delete(new_sourcept)
 arcpy.management.Delete(new_sourcepy)
 arcpy.management.Delete(eo_sources)
 arcpy.management.Delete(SF_NHA_joined_path)
+
+# Visualize the visit counts before and after the reference year for each NHA
+# Convert stat_analysis_path to dataframe
+def getnull(oid):
+    nullRows.append(oid)
+    return True
+
+nullRows = list()
+stat_res_arr = arcpy.da.TableToNumPyArray(stat_analysis_path,
+                                          field_names="*",
+                                          skip_nulls=getnull)
+stat_res_df = pd.DataFrame(stat_res_arr)
+
+# NHA_join_ids: numpy array of NHA_join_ids of NHAs that user requested, default is all
+def plot_NHA(stat_res_df, NHA_join_ids):
+    df = stat_res_df[stat_res_df['SF_NHA_joined_NHA_JOIN_ID'].isin(NHA_join_ids)]
+    NHA_join_IDs = NHA_join_ids.tolist()  # Convert numpy array to list
+    visit_counts = {
+        'before REF': np.array(df["count_before"]),
+        'after REF': np.array(df["count_after"]),
+    }
+
+    width = 0.6  # the width of the bars: can also be len(x) sequence
+
+    fig, ax = plt.subplots()
+    bottom = np.zeros(len(NHA_join_IDs))
+
+    for label, counts in visit_counts.items():
+        p = ax.bar(NHA_join_IDs, counts, width, label=label, bottom=bottom)
+        bottom += counts
+
+        ax.bar_label(p, label_type='center')
+
+    ax.set_title('NHA Visits Visualization')
+    ax.legend()
+
+    plt.show()
+
+# Example of calling this simple visualization:
+# plot_NHA(stat_res_df, np.array(['xxx43062', 'ct69874']))
